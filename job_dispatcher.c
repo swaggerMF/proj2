@@ -1,4 +1,5 @@
 #include <mpi.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,6 +37,46 @@ typedef struct {
     int str_len;
     char client[CLIENT_ID_LEN];
 } ResultPacket;
+
+typedef enum {
+    LINE_EMPTY = 0,
+    LINE_WAIT,
+    LINE_JOB,
+    LINE_BAD
+} LineKind;
+
+typedef struct {
+    LineKind kind;
+    int wait_seconds;
+    int cmd;
+    long long n;
+    char client[CLIENT_ID_LEN];
+    char name[NAME_LEN];
+} ParsedCmd;
+
+LineKind parse_line(const char *line, ParsedCmd *out) {
+    if (!line || !out) return LINE_BAD;
+    out->kind = LINE_BAD;
+    return LINE_BAD;
+}
+
+long long count_primes_sieve(int n) {
+    (void)n;
+    return 0;
+}
+
+long long count_prime_divisors(long long n) {
+    (void)n;
+    return 0;
+}
+
+int build_anagrams(const char *input, char **out, size_t *out_len, int *count) {
+    (void)input;
+    if (out) *out = NULL;
+    if (out_len) *out_len = 0;
+    if (count) *count = 0;
+    return 1;
+}
 
 int main(int argc, char **argv) {
     MPI_Init(&argc, &argv);
