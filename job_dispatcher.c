@@ -178,20 +178,141 @@ LineKind parse_line(const char *line, ParsedCmd *out) {
 }
 
 long long count_primes_sieve(int n) {
-    (void)n;
-    return 0;
+    if (n < 2) return 0;
+    unsigned char *flags = malloc((size_t)n + 1);
+    if (!flags) {
+        perror("malloc primes");
+        exit(EXIT_FAILURE);
+    }
+    memset(flags, 1, (size_t)n + 1);
+    flags[0] = 0;
+    flags[1] = 0;
+    for (int p = 2; (long long)p * p <= n; p++) {
+        if (!flags[p]) continue;
+        for (int k = p * p; k <= n; k += p) flags[k] = 0;
+    }
+    long long count = 0;
+    for (int i = 2; i <= n; i++) {
+        if (flags[i]) count++;
+    }
+    free(flags);
+    return count;
 }
 
 long long count_prime_divisors(long long n) {
-    (void)n;
-    return 0;
+    if (n <= 1) return 0;
+    long long count = 0;
+    if (n % 2 == 0) {
+        count++;
+        while (n % 2 == 0) n /= 2;
+    }
+    for (long long p = 3; p * p <= n; p += 2) {
+        if (n % p == 0) {
+            count++;
+            while (n % p == 0) n /= p;
+        }
+    }
+    if (n > 1) count++;
+    return count;
+}
+
+typedef struct {
+    char *data;
+    size_t len;
+    size_t cap;
+} StrBuf;
+
+void sb_init(StrBuf *sb, size_t cap) {
+    sb->data = malloc(cap);
+    if (!sb->data) {
+        perror("malloc anagrams");
+        exit(EXIT_FAILURE);
+    }
+    sb->len = 0;
+    sb->cap = cap;
+}
+
+void sb_reserve(StrBuf *sb, size_t extra) {
+    if (sb->len + extra <= sb->cap) return;
+    size_t new_cap = sb->cap == 0 ? 128 : sb->cap;
+    while (new_cap < sb->len + extra) new_cap *= 2;
+    char *next = realloc(sb->data, new_cap);
+    if (!next) {
+        perror("realloc anagrams");
+        exit(EXIT_FAILURE);
+    }
+    sb->data = next;
+    sb->cap = new_cap;
+}
+
+void sb_append(StrBuf *sb, const char *src, size_t n) {
+    sb_reserve(sb, n);
+    memcpy(sb->data + sb->len, src, n);
+    sb->len += n;
+}
+
+int cmp_char(const void *a, const void *b) {
+    char ca = *(const char *)a;
+    char cb = *(const char *)b;
+    return (ca > cb) - (ca < cb);
+}
+
+int next_permutation(char *a, int n) {
+    int i = n - 2;
+    while (i >= 0 && a[i] >= a[i + 1]) i--;
+    if (i < 0) return 0;
+    int j = n - 1;
+    while (a[j] <= a[i]) j--;
+    char tmp = a[i];
+    a[i] = a[j];
+    a[j] = tmp;
+    for (int l = i + 1, r = n - 1; l < r; l++, r--) {
+        char t = a[l];
+        a[l] = a[r];
+        a[r] = t;
+    }
+    return 1;
 }
 
 int build_anagrams(const char *input, char **out, size_t *out_len, int *count) {
-    (void)input;
-    if (out) *out = NULL;
-    if (out_len) *out_len = 0;
-    if (count) *count = 0;
+    if (!input || !out || !out_len || !count) return 0;
+    size_t n = strlen(input);
+    if (n > NAME_LEN - 1) return 0;
+    if (n == 0) {
+        *out = malloc(1);
+        if (!*out) {
+            perror("malloc anagrams");
+            exit(EXIT_FAILURE);
+        }
+        (*out)[0] = '\0';
+        *out_len = 0;
+        *count = 0;
+        return 1;
+    }
+
+    char *chars = malloc(n);
+    if (!chars) {
+        perror("malloc anagrams");
+        exit(EXIT_FAILURE);
+    }
+    memcpy(chars, input, n);
+    qsort(chars, n, sizeof(char), cmp_char);
+
+    StrBuf sb;
+    sb_init(&sb, 128);
+    int total = 0;
+    do {
+        sb_append(&sb, chars, n);
+        sb_append(&sb, "\n", 1);
+        total++;
+    } while (next_permutation(chars, (int)n));
+
+    free(chars);
+    sb_reserve(&sb, 1);
+    sb.data[sb.len] = '\0';
+    *out = sb.data;
+    *out_len = sb.len;
+    *count = total;
     return 1;
 }
 
