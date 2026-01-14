@@ -40,6 +40,23 @@ typedef struct {
     char client[CLIENT_ID_LEN];
 } ResultPacket;
 
+typedef struct {
+    int job_id;
+    int cmd;
+    long long n;
+    char client[CLIENT_ID_LEN];
+    char name[NAME_LEN];
+    int worker_rank;
+    double received;
+    double dispatched;
+    double finished;
+} JobLog;
+
+typedef struct {
+    JobLog *items;
+    int cap;
+} LogBook;
+
 typedef enum {
     LINE_EMPTY = 0,
     LINE_WAIT,
@@ -55,6 +72,41 @@ typedef struct {
     char client[CLIENT_ID_LEN];
     char name[NAME_LEN];
 } ParsedCmd;
+
+const char *cmd_label(int cmd) {
+    switch (cmd) {
+        case CMD_PRIMES: return "PRIMES";
+        case CMD_PRIMEDIVISORS: return "PRIMEDIVISORS";
+        case CMD_ANAGRAMS: return "ANAGRAMS";
+        default: return "UNKNOWN";
+    }
+}
+
+void logbook_ensure(LogBook *lb, int job_id) {
+    if (job_id < lb->cap) return;
+    int new_cap = lb->cap == 0 ? 1024 : lb->cap;
+    while (job_id >= new_cap) new_cap *= 2;
+    JobLog *next = realloc(lb->items, (size_t)new_cap * sizeof(*next));
+    if (!next) {
+        perror("realloc logbook");
+        exit(EXIT_FAILURE);
+    }
+    memset(next + lb->cap, 0, (size_t)(new_cap - lb->cap) * sizeof(*next));
+    lb->items = next;
+    lb->cap = new_cap;
+}
+
+void write_client_line(const char *client, const char *text) {
+    char fname[64];
+    snprintf(fname, sizeof(fname), "%s.out", client);
+    FILE *f = fopen(fname, "a");
+    if (!f) {
+        perror("fopen client output");
+        return;
+    }
+    fputs(text, f);
+    fclose(f);
+}
 
 void rstrip_inplace(char *s) {
     size_t len = strlen(s);
