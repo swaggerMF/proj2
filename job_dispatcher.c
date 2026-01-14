@@ -168,14 +168,12 @@ LineKind parse_line(const char *line, ParsedCmd *out) {
     char buf[LINE_BUF];
     snprintf(buf, sizeof(buf), "%s", line);
     rstrip_inplace(buf);
-
     char *cur = buf;
     char *t1 = next_token(&cur);
     if (!t1) {
         out->kind = LINE_EMPTY;
         return LINE_EMPTY;
     }
-
     if (strcmp(t1, "WAIT") == 0) {
         char *t2 = next_token(&cur);
         char *extra = next_token(&cur);
@@ -344,7 +342,6 @@ int build_anagrams(const char *input, char **out, size_t *out_len, int *count) {
         *count = 0;
         return 1;
     }
-
     char *chars = malloc(n);
     if (!chars) {
         perror("malloc anagrams");
@@ -593,8 +590,60 @@ void run_worker(void) {
 }
 
 void run_serial(const char *cmd_path) {
-    (void)cmd_path;
-    fprintf(stdout, "serial placeholder\n");
+    FILE *fp = fopen(cmd_path, "r");
+    if (!fp) {
+        perror("fopen command file");
+        return;
+    }
+
+    FILE *mes = fopen("time_measurements.txt", "a");
+    if (!mes) {
+        perror("fopen time measurements");
+        fclose(fp);
+        return;
+    }
+
+    double t_start = MPI_Wtime();
+    char line[LINE_BUF];
+    int job_id = 1;
+
+    while (fgets(line, sizeof(line), fp)) {
+        ParsedCmd pc;
+        LineKind kind = parse_line(line, &pc);
+        if (kind == LINE_EMPTY || kind == LINE_BAD) continue;
+        if (kind == LINE_WAIT) continue;
+
+        if (pc.cmd == CMD_PRIMES) {
+            long long ans = count_primes_sieve((int)pc.n);
+            char out[256];
+            snprintf(out, sizeof(out), "JOB %d PRIMES => %lld\n", job_id, ans);
+            write_client_line(pc.client, out);
+        } else if (pc.cmd == CMD_PRIMEDIVISORS) {
+            long long ans = count_prime_divisors(pc.n);
+            char out[256];
+            snprintf(out, sizeof(out), "JOB %d PRIMEDIVISORS => %lld\n", job_id, ans);
+            write_client_line(pc.client, out);
+        } else if (pc.cmd == CMD_ANAGRAMS) {
+            char *out = NULL;
+            size_t len = 0;
+            int count = 0;
+            build_anagrams(pc.name, &out, &len, &count);
+            char header[256];
+            snprintf(header, sizeof(header), "JOB %d ANAGRAMS => %d anagrams\n", job_id, count);
+            write_client_line(pc.client, header);
+            if (out) {
+                write_client_line(pc.client, out);
+                write_client_line(pc.client, "\n");
+                free(out);
+            }
+        }
+        job_id++;
+    }
+
+    double t_end = MPI_Wtime();
+    fprintf(mes, "serial_total_seconds=%.6f\n", (t_end - t_start));
+    fclose(mes);
+    fclose(fp);
 }
 
 int main(int argc, char **argv) {

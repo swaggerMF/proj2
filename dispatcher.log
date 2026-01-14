@@ -1,0 +1,11 @@
+job=1 client=CLI0 cmd=PRIMEDIVISORS arg=452876 worker=1 received=0.000068 dispatched=0.000068 finished=0.000349
+job=2 client=CLI1 cmd=ANAGRAMS arg=tralala worker=2 received=0.000325 dispatched=0.000325 finished=2.000568
+job=3 client=CLI2 cmd=PRIMEDIVISORS arg=129072 worker=1 received=0.000432 dispatched=0.000432 finished=3.000718
+job=4 client=CLI3 cmd=PRIMES arg=2908764 worker=2 received=2.000649 dispatched=2.000649 finished=3.000799
+job=5 client=CLI4 cmd=PRIMES arg=10000987 worker=1 received=3.000789 dispatched=3.000789 finished=3.032487
+job=7 client=CLI6 cmd=PRIMES arg=20876 worker=1 received=3.032563 dispatched=3.032563 finished=3.032590
+job=8 client=CLI7 cmd=ANAGRAMS arg=friend worker=1 received=3.032612 dispatched=3.032612 finished=6.032706
+job=6 client=CLI5 cmd=PRIMES arg=12043876 worker=2 received=3.000825 dispatched=3.000825 finished=6.032817
+job=10 client=CLI9 cmd=ANAGRAMS arg=rainbow worker=2 received=6.032838 dispatched=6.032838 finished=6.032908
+job=9 client=CLI8 cmd=ANAGRAMS arg=sunshine worker=1 received=6.032814 dispatched=6.032814 finished=6.032983
+job=11 client=CLI10 cmd=PRIMES arg=3451629 worker=2 received=6.032979 dispatched=6.032979 finished=6.040079
