@@ -1,9 +1,12 @@
+#define _POSIX_C_SOURCE 200809L
+
 #include <mpi.h>
 #include <ctype.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define MASTER_RANK 0
 #define CLIENT_ID_LEN 32
@@ -390,14 +393,203 @@ int recv_result_packet(ResultPacket *res, int *src) {
     return 1;
 }
 
+int find_free_worker(const int *worker_free, int comm_sz) {
+    for (int r = 1; r < comm_sz; r++) {
+        if (worker_free[r]) return r;
+    }
+    return -1;
+}
+
+void handle_result(int *worker_free, LogBook *lb, FILE *logf, double t0) {
+    ResultPacket res;
+    int src = -1;
+    recv_result_packet(&res, &src);
+    worker_free[src] = 1;
+
+    logbook_ensure(lb, res.job_id);
+    JobLog *log = &lb->items[res.job_id];
+    log->finished = MPI_Wtime() - t0;
+
+    if (logf) {
+        if (log->cmd == CMD_ANAGRAMS) {
+            fprintf(logf,
+                    "job=%d client=%s cmd=%s arg=%s worker=%d received=%.6f dispatched=%.6f finished=%.6f\n",
+                    log->job_id, log->client, cmd_label(log->cmd), log->name,
+                    log->worker_rank, log->received, log->dispatched, log->finished);
+        } else {
+            fprintf(logf,
+                    "job=%d client=%s cmd=%s arg=%lld worker=%d received=%.6f dispatched=%.6f finished=%.6f\n",
+                    log->job_id, log->client, cmd_label(log->cmd), log->n,
+                    log->worker_rank, log->received, log->dispatched, log->finished);
+        }
+        fflush(logf);
+    }
+
+    if (res.cmd == CMD_ANAGRAMS && res.str_len > 0) {
+        char *buf = malloc((size_t)res.str_len + 1);
+        if (!buf) {
+            perror("malloc result");
+            return;
+        }
+        MPI_Recv(buf, res.str_len, MPI_CHAR, src, TAG_RESULT_STRING, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        buf[res.str_len] = '\0';
+
+        char header[256];
+        snprintf(header, sizeof(header), "JOB %d ANAGRAMS => %d anagrams\n",
+                 res.job_id, res.anagram_count);
+        write_client_line(res.client, header);
+        write_client_line(res.client, buf);
+        write_client_line(res.client, "\n");
+        free(buf);
+    } else {
+        char line[256];
+        if (res.cmd == CMD_PRIMES) {
+            snprintf(line, sizeof(line), "JOB %d PRIMES => %lld\n", res.job_id, res.num_result);
+        } else {
+            snprintf(line, sizeof(line), "JOB %d PRIMEDIVISORS => %lld\n", res.job_id, res.num_result);
+        }
+        write_client_line(res.client, line);
+    }
+}
+
 void run_master(const char *cmd_path, int comm_sz) {
-    (void)cmd_path;
-    (void)comm_sz;
-    fprintf(stdout, "master placeholder\n");
+    FILE *fp = fopen(cmd_path, "r");
+    if (!fp) {
+        perror("fopen command file");
+        return;
+    }
+
+    FILE *logf = fopen("dispatcher.log", "w");
+    if (!logf) {
+        perror("fopen dispatcher log");
+        fclose(fp);
+        return;
+    }
+
+    int *worker_free = calloc((size_t)comm_sz, sizeof(int));
+    if (!worker_free) {
+        perror("calloc worker state");
+        fclose(fp);
+        fclose(logf);
+        return;
+    }
+    for (int r = 1; r < comm_sz; r++) worker_free[r] = 1;
+
+    double t0 = MPI_Wtime();
+    double t_start = t0;
+
+    LogBook lb = {0};
+    char line[LINE_BUF];
+    int job_id = 1;
+    int active_jobs = 0;
+
+    while (fgets(line, sizeof(line), fp)) {
+        ParsedCmd pc;
+        LineKind kind = parse_line(line, &pc);
+        if (kind == LINE_EMPTY) continue;
+        if (kind == LINE_BAD) {
+            fprintf(stderr, "Invalid command: %s", line);
+            continue;
+        }
+        if (kind == LINE_WAIT) {
+            sleep((unsigned int)pc.wait_seconds);
+            continue;
+        }
+
+        int worker = find_free_worker(worker_free, comm_sz);
+        while (worker == -1) {
+            handle_result(worker_free, &lb, logf, t0);
+            active_jobs--;
+            worker = find_free_worker(worker_free, comm_sz);
+        }
+
+        JobPacket job;
+        memset(&job, 0, sizeof(job));
+        job.job_id = job_id++;
+        job.cmd = pc.cmd;
+        job.n = pc.n;
+        snprintf(job.client, sizeof(job.client), "%s", pc.client);
+        snprintf(job.name, sizeof(job.name), "%s", pc.name);
+
+        logbook_ensure(&lb, job.job_id);
+        JobLog *log = &lb.items[job.job_id];
+        memset(log, 0, sizeof(*log));
+        log->job_id = job.job_id;
+        log->cmd = job.cmd;
+        log->n = job.n;
+        snprintf(log->client, sizeof(log->client), "%s", job.client);
+        snprintf(log->name, sizeof(log->name), "%s", job.name);
+        log->received = MPI_Wtime() - t0;
+        log->worker_rank = worker;
+        log->dispatched = MPI_Wtime() - t0;
+
+        send_job_packet(&job, worker, TAG_WORK);
+        worker_free[worker] = 0;
+        active_jobs++;
+    }
+
+    fclose(fp);
+
+    while (active_jobs > 0) {
+        handle_result(worker_free, &lb, logf, t0);
+        active_jobs--;
+    }
+
+    JobPacket stop = {0};
+    for (int r = 1; r < comm_sz; r++) {
+        send_job_packet(&stop, r, TAG_STOP);
+    }
+
+    double t_end = MPI_Wtime();
+    FILE *mes = fopen("time_measurements.txt", "a");
+    if (mes) {
+        fprintf(mes, "parallel_total_seconds=%.6f, workers=%d\n",
+                (t_end - t_start), comm_sz - 1);
+        fclose(mes);
+    }
+
+    free(lb.items);
+    free(worker_free);
+    fclose(logf);
 }
 
 void run_worker(void) {
-    fprintf(stdout, "worker placeholder\n");
+    while (1) {
+        JobPacket job;
+        MPI_Status st;
+        int ok = recv_job_packet(&job, MASTER_RANK, &st);
+        if (!ok) break;
+
+        ResultPacket res;
+        memset(&res, 0, sizeof(res));
+        res.job_id = job.job_id;
+        res.cmd = job.cmd;
+        snprintf(res.client, sizeof(res.client), "%s", job.client);
+
+        if (job.cmd == CMD_PRIMES) {
+            res.num_result = count_primes_sieve((int)job.n);
+            send_result_packet(&res, MASTER_RANK);
+        } else if (job.cmd == CMD_PRIMEDIVISORS) {
+            res.num_result = count_prime_divisors(job.n);
+            send_result_packet(&res, MASTER_RANK);
+        } else if (job.cmd == CMD_ANAGRAMS) {
+            char *out = NULL;
+            size_t len = 0;
+            int count = 0;
+            if (!build_anagrams(job.name, &out, &len, &count) || !out) {
+                send_result_packet(&res, MASTER_RANK);
+            } else {
+                res.anagram_count = count;
+                res.str_len = (int)len;
+                send_result_packet(&res, MASTER_RANK);
+                if (res.str_len > 0) {
+                    MPI_Send(out, res.str_len, MPI_CHAR, MASTER_RANK,
+                             TAG_RESULT_STRING, MPI_COMM_WORLD);
+                }
+                free(out);
+            }
+        }
+    }
 }
 
 void run_serial(const char *cmd_path) {
